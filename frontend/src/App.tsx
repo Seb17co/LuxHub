@@ -7,6 +7,7 @@ import Dashboard from './components/Dashboard'
 import SalesView from './components/SalesView'
 import InventoryView from './components/InventoryView'
 import AIChat from './components/AIChat'
+import SpyAdmin from './components/SpyAdmin'
 import Layout from './components/Layout'
 import './index.css'
 
@@ -43,20 +44,48 @@ function App() {
 
   const fetchUserProfile = async (userId: string) => {
     try {
+      // First check if user exists in our users table
       const { data, error } = await supabase
         .from('users')
         .select('*')
         .eq('id', userId)
         .single()
 
-      if (error) {
+      if (error && error.code !== 'PGRST116') { // PGRST116 = no rows returned
         console.error('Error fetching user profile:', error)
         return
       }
 
-      setUser(data)
+      if (data) {
+        setUser(data)
+      } else {
+        // User doesn't exist in our users table yet, create a basic profile
+        // This happens when a user logs in for the first time
+        const session = await supabase.auth.getSession()
+        if (session.data.session?.user?.email) {
+          console.log('Creating new user profile for:', session.data.session.user.email)
+          // For now, we'll just set a basic user object without inserting to DB
+          // In production, you'd want to create the user record
+          setUser({
+            id: userId,
+            email: session.data.session.user.email,
+            role: 'sales', // default role
+            created_at: new Date().toISOString()
+          })
+        }
+      }
     } catch (error) {
       console.error('Error fetching user profile:', error)
+      // Don't prevent login if user profile fetch fails
+      const session = await supabase.auth.getSession()
+      if (session.data.session?.user?.email) {
+        setUser({
+          id: userId,
+          email: session.data.session.user.email,
+          role: 'sales', // default role
+          created_at: new Date().toISOString()
+        })
+      }
     }
   }
 
@@ -98,6 +127,16 @@ function App() {
             } 
           />
           <Route path="/ai" element={<AIChat user={user} />} />
+          <Route 
+            path="/admin/spy" 
+            element={
+              user?.role === 'admin' ? (
+                <SpyAdmin user={user} />
+              ) : (
+                <Navigate to="/" replace />
+              )
+            } 
+          />
           <Route path="*" element={<Navigate to="/" replace />} />
         </Routes>
       </Layout>

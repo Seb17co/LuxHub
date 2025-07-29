@@ -11,7 +11,6 @@ import {
   Bars3Icon,
   XMarkIcon,
   ArrowRightOnRectangleIcon,
-  Cog6ToothIcon,
   SparklesIcon
 } from '@heroicons/react/24/outline'
 
@@ -47,14 +46,32 @@ export default function Layout({ children, user }: LayoutProps) {
   }, [])
 
   const fetchNotifications = async () => {
-    const { data } = await supabase
-      .from('notifications')
-      .select('*')
-      .order('created_at', { ascending: false })
-      .limit(10)
+    try {
+      const { data, error } = await supabase
+        .from('notifications')
+        .select('*')
+        .order('created_at', { ascending: false })
+        .limit(10)
 
-    if (data) {
-      setNotifications(data)
+      if (error) {
+        console.warn('Notifications table not accessible:', error)
+        // Use mock notifications for development
+        setNotifications([
+          {
+            id: 1,
+            title: 'Welcome to LuxKids Hub!',
+            body: 'Your modern dashboard is ready to use.',
+            type: 'info' as const,
+            created_at: new Date().toISOString(),
+            read_by: []
+          }
+        ])
+      } else if (data) {
+        setNotifications(data)
+      }
+    } catch (error) {
+      console.warn('Error fetching notifications, using fallback data')
+      setNotifications([])
     }
   }
 

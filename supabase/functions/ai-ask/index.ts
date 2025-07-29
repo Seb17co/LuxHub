@@ -48,7 +48,7 @@ serve(async (req) => {
     const functions = [
       {
         name: "getSales",
-        description: "Get sales data for a specific period",
+        description: "Get sales data for a specific period from both Shopify and SPY systems",
         parameters: {
           type: "object",
           properties: {
@@ -56,6 +56,11 @@ serve(async (req) => {
               type: "string",
               enum: ["day", "week", "month"],
               description: "Time period for sales data"
+            },
+            system: {
+              type: "string",
+              enum: ["shopify", "spy", "both"],
+              description: "Which system to get data from (default: both)"
             }
           },
           required: ["period"]
@@ -77,11 +82,46 @@ serve(async (req) => {
             }
           }
         }
+      },
+      {
+        name: "getOrderStatus",
+        description: "Get status and details of specific orders from SPY system",
+        parameters: {
+          type: "object",
+          properties: {
+            order_number: {
+              type: "string",
+              description: "SPY order number to look up"
+            },
+            customer_email: {
+              type: "string",
+              description: "Customer email to find their orders"
+            }
+          }
+        }
+      },
+      {
+        name: "getProductSearch",
+        description: "Search for products by name, SKU, or other criteria",
+        parameters: {
+          type: "object",
+          properties: {
+            search_term: {
+              type: "string",
+              description: "Search term for product name or SKU"
+            },
+            include_stock: {
+              type: "boolean",
+              description: "Whether to include current stock levels"
+            }
+          },
+          required: ["search_term"]
+        }
       }
     ]
 
     // Function implementations
-    const getSales = async (period: string) => {
+    const getSales = async (period: string, system: string = 'both') => {
       const now = new Date()
       let startDate: Date
       
@@ -101,25 +141,38 @@ serve(async (req) => {
           startDate = new Date(now.setHours(0, 0, 0, 0))
       }
 
-      const { data: shopifyOrders } = await supabaseClient
-        .from('shopify_orders')
-        .select('total_amount, created_at, customer_email')
-        .gte('created_at', startDate.toISOString())
-        .order('created_at', { ascending: false })
+      const result: any = { period, system }
 
-      const { data: spyOrders } = await supabaseClient
-        .from('spy_orders')
-        .select('total_amount, created_at, order_number')
-        .gte('created_at', startDate.toISOString())
-        .order('created_at', { ascending: false })
+      if (system === 'shopify' || system === 'both') {
+        const { data: shopifyOrders } = await supabaseClient
+          .from('shopify_orders')
+          .select('total_amount, created_at, customer_email, status')
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
 
-      return {
-        period,
-        shopify_orders: shopifyOrders || [],
-        spy_orders: spyOrders || [],
-        total_shopify: shopifyOrders?.reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0) || 0,
-        total_spy: spyOrders?.reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0) || 0
+        result.shopify_orders = shopifyOrders || []
+        result.total_shopify = shopifyOrders?.reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0) || 0
+        result.shopify_count = shopifyOrders?.length || 0
       }
+
+      if (system === 'spy' || system === 'both') {
+        const { data: spyOrders } = await supabaseClient
+          .from('spy_orders')
+          .select('total_amount, created_at, order_number, json')
+          .gte('created_at', startDate.toISOString())
+          .order('created_at', { ascending: false })
+
+        result.spy_orders = spyOrders || []
+        result.total_spy = spyOrders?.reduce((sum, order) => sum + (Number(order.total_amount) || 0), 0) || 0
+        result.spy_count = spyOrders?.length || 0
+      }
+
+      if (system === 'both') {
+        result.total_combined = (result.total_shopify || 0) + (result.total_spy || 0)
+        result.orders_combined = (result.shopify_count || 0) + (result.spy_count || 0)
+      }
+
+      return result
     }
 
     const getInventory = async (product_sku?: string, low_stock_only?: boolean) => {
@@ -168,13 +221,102 @@ serve(async (req) => {
       return Array.from(latestByProduct.values())
     }
 
+    const getOrderStatus = async (order_number?: string, customer_email?: string) => {
+      let query = supabaseClient.from('spy_orders').select('*')
+
+      if (order_number) {
+        query = query.eq('order_number', order_number)
+      } else if (customer_email) {
+        // Search in JSON field for customer email
+        query = query.or(`json->>customer_email.eq.${customer_email}`)
+      } else {
+        return { error: 'Either order_number or customer_email is required' }
+      }
+
+      const { data: orders, error } = await query.order('created_at', { ascending: false }).limit(10)
+
+      if (error) {
+        return { error: error.message }
+      }
+
+      return {
+        orders: orders?.map(order => ({
+          order_number: order.order_number,
+          created_at: order.created_at,
+          total_amount: order.total_amount,
+          status: order.json?.status || 'unknown',
+          customer_email: order.json?.customer_email,
+          items_count: order.json?.items?.length || 0
+        })) || []
+      }
+    }
+
+    const getProductSearch = async (search_term: string, include_stock?: boolean) => {
+      const { data: products, error } = await supabaseClient
+        .from('products')
+        .select(`
+          id,
+          sku,
+          name,
+          min_stock,
+          created_at,
+          updated_at
+        `)
+        .or(`sku.ilike.%${search_term}%,name.ilike.%${search_term}%`)
+        .order('updated_at', { ascending: false })
+        .limit(20)
+
+      if (error) {
+        return { error: error.message }
+      }
+
+      const result = products || []
+
+      if (include_stock && result.length > 0) {
+        // Get latest stock levels for these products
+        const productIds = result.map(p => p.id)
+        const { data: snapshots } = await supabaseClient
+          .from('inventory_snapshots')
+          .select('product_id, stock_level, taken_at')
+          .in('product_id', productIds)
+          .order('taken_at', { ascending: false })
+
+        // Group by product_id and get latest
+        const latestStock = new Map()
+        snapshots?.forEach(snapshot => {
+          if (!latestStock.has(snapshot.product_id)) {
+            latestStock.set(snapshot.product_id, {
+              stock_level: snapshot.stock_level,
+              last_updated: snapshot.taken_at
+            })
+          }
+        })
+
+        // Add stock info to products
+        result.forEach(product => {
+          const stock = latestStock.get(product.id)
+          product.current_stock = stock?.stock_level || 0
+          product.stock_last_updated = stock?.last_updated
+          product.is_low_stock = (stock?.stock_level || 0) < (product.min_stock || 0)
+        })
+      }
+
+      return { products: result, search_term }
+    }
+
     // Make initial OpenAI call
     const completion = await openai.chat.completions.create({
       model: "gpt-4o",
       messages: [
         {
           role: "system",
-          content: "You are a helpful assistant for LuxKids, a children's retail company. You can help with sales data and inventory management. Always provide clear, actionable insights."
+          content: `You are a helpful assistant for LuxKids, a children's retail company. You have access to data from both Shopify and SPY systems. You can help with:
+          - Sales analysis from both platforms
+          - Inventory management and stock levels
+          - Order tracking and customer service
+          - Product search and information
+          
+          Always provide clear, actionable insights and mention which system the data comes from when relevant. If asked about recent performance, focus on practical business metrics like revenue, order counts, and stock alerts.`
         },
         {
           role: "user", 
@@ -196,9 +338,13 @@ serve(async (req) => {
         const args = JSON.parse(functionCall.arguments)
         
         if (functionCall.name === 'getSales') {
-          functionResult = await getSales(args.period)
+          functionResult = await getSales(args.period, args.system)
         } else if (functionCall.name === 'getInventory') {
           functionResult = await getInventory(args.product_sku, args.low_stock_only)
+        } else if (functionCall.name === 'getOrderStatus') {
+          functionResult = await getOrderStatus(args.order_number, args.customer_email)
+        } else if (functionCall.name === 'getProductSearch') {
+          functionResult = await getProductSearch(args.search_term, args.include_stock)
         }
 
         // Make second OpenAI call with function result
@@ -207,7 +353,7 @@ serve(async (req) => {
           messages: [
             {
               role: "system",
-              content: "You are a helpful assistant for LuxKids, a children's retail company. Provide clear, actionable insights based on the data."
+              content: "You are a helpful assistant for LuxKids, a children's retail company. Provide clear, actionable insights based on the data. Include specific numbers and recommendations when possible."
             },
             {
               role: "user",

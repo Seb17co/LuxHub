@@ -5,8 +5,8 @@ import {
   ShoppingCartIcon, 
   ExclamationTriangleIcon,
   ChartBarIcon,
-  TrendingUpIcon,
-  TrendingDownIcon,
+  ArrowTrendingUpIcon,
+  ArrowTrendingDownIcon,
   ArrowRightIcon,
   EyeIcon
 } from '@heroicons/react/24/outline'
@@ -44,29 +44,53 @@ export default function Dashboard({ user }: DashboardProps) {
   const fetchDashboardData = async () => {
     setLoading(true)
     try {
-      // Fetch sales summary
-      const { data: salesData } = await supabase.functions.invoke('sales-summary', {
-        method: 'GET',
-        headers: {
-          'Content-Type': 'application/json',
-        },
-      })
-
-      if (salesData) {
-        setSalesSummary(salesData)
-      }
-
-      // Fetch low stock items if user has warehouse or admin role
-      if (user?.role === 'warehouse' || user?.role === 'admin') {
-        const { data: inventoryData } = await supabase.functions.invoke('inventory-top20', {
+      // Fetch sales summary with better error handling
+      try {
+        const { data: salesData, error: salesError } = await supabase.functions.invoke('sales-summary', {
           method: 'GET',
           headers: {
             'Content-Type': 'application/json',
           },
         })
 
-        if (inventoryData?.items) {
-          setLowStockItems(inventoryData.items.filter((item: InventoryItem) => item.is_low_stock))
+        if (salesError) {
+          console.warn('Sales summary function not available:', salesError)
+        } else if (salesData) {
+          setSalesSummary(salesData)
+        }
+      } catch (error) {
+        console.warn('Sales summary function not available, using mock data')
+        // Set mock data for development
+        setSalesSummary({
+          period: 'day',
+          shopify: { total: 15000, orderCount: 12 },
+          spy: { total: 8500, orderCount: 7 },
+          combined: { total: 23500, orderCount: 19 }
+        })
+      }
+
+      // Fetch low stock items if user has warehouse or admin role
+      if (user?.role === 'warehouse' || user?.role === 'admin') {
+        try {
+          const { data: inventoryData, error: inventoryError } = await supabase.functions.invoke('inventory-top20', {
+            method: 'GET',
+            headers: {
+              'Content-Type': 'application/json',
+            },
+          })
+
+          if (inventoryError) {
+            console.warn('Inventory function not available:', inventoryError)
+          } else if (inventoryData?.items) {
+            setLowStockItems(inventoryData.items.filter((item: InventoryItem) => item.is_low_stock))
+          }
+        } catch (error) {
+          console.warn('Inventory function not available, using mock data')
+          // Set mock low stock items for development
+          setLowStockItems([
+            { sku: 'LUX001', name: 'Premium Baby Shoes', stock_level: 2, min_stock: 10, is_low_stock: true },
+            { sku: 'LUX002', name: 'Designer T-Shirt', stock_level: 1, min_stock: 5, is_low_stock: true }
+          ])
         }
       }
     } catch (error) {
@@ -178,7 +202,7 @@ export default function Dashboard({ user }: DashboardProps) {
 
       {/* Stats Grid */}
       <div className="stats-grid">
-        {stats.map((item, index) => (
+        {stats.map((item) => (
           <div key={item.name} className="stat-card group">
             <div className="flex items-center justify-between mb-4">
               <div className={`w-12 h-12 bg-gradient-to-r ${item.gradient} rounded-xl flex items-center justify-center group-hover:scale-110 transition-transform duration-200`}>
@@ -191,8 +215,8 @@ export default function Dashboard({ user }: DashboardProps) {
                   ? 'bg-red-100 text-red-800'
                   : 'bg-gray-100 text-gray-600'
               }`}>
-                {item.changeType === 'positive' && <TrendingUpIcon className="w-3 h-3" />}
-                {item.changeType === 'negative' && <TrendingDownIcon className="w-3 h-3" />}
+                {item.changeType === 'positive' && <ArrowTrendingUpIcon className="w-3 h-3" />}
+                {item.changeType === 'negative' && <ArrowTrendingDownIcon className="w-3 h-3" />}
                 {item.change}
               </div>
             </div>
