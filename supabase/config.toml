@@ -75,9 +75,9 @@ additional_redirect_urls = ["https://luxkids-hub.vercel.app"]
 # How long tokens are valid for, in seconds. Defaults to 3600 (1 hour), maximum 604800 (1 week).
 jwt_expiry = 3600
 # If disabled, the refresh token will never expire.
-refresh_token_rotation_enabled = true
+enable_refresh_token_rotation = true
 # Allows refresh tokens to be reused after expiry, up to the specified interval in seconds.
-# Requires refresh_token_rotation_enabled to be false.
+# Requires enable_refresh_token_rotation to be false.
 # refresh_token_reuse_interval = 10
 # Allow/disallow new user signups to your project.
 enable_signup = true

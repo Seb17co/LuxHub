@@ -1,5 +1,18 @@
 {
+  "scripts": {
+    "dev": "cd frontend && npm run dev",
+    "build": "cd frontend && npm run build",
+    "install-all": "npm install && cd frontend && npm install",
+    "start": "concurrently \"npm run supabase:start\" \"npm run dev\" --names \"supabase,frontend\" --prefix-colors \"blue,green\"",
+    "supabase:start": "supabase start",
+    "supabase:stop": "supabase stop",
+    "supabase:reset": "supabase db reset",
+    "functions:deploy": "supabase functions deploy"
+  },
   "dependencies": {
     "@openai/agents": "^0.0.14"
+  },
+  "devDependencies": {
+    "concurrently": "^8.2.2"
   }
 }
