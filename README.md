@@ -31,6 +31,7 @@ LuxKids Hub is a comprehensive internal dashboard that provides AI-powered insig
 - **React 18** with TypeScript
 - **Vite** for fast development and builds
 - **Tailwind CSS** for styling
+- **Inter font** for a modern look
 - **React Router** for navigation
 - **Recharts** for data visualization
 - **Heroicons** for UI icons
