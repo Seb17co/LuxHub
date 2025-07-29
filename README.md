@@ -95,6 +95,8 @@ cd LuxHub
 ### 2. Frontend Setup
 ```bash
 cd frontend
+# All npm scripts live here. Running them from the repo root will cause
+# "ENOENT: no such file or directory, open 'package.json'" errors.
 npm install
 npm run dev
 ```
